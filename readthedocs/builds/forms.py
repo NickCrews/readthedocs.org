@@ -14,6 +14,8 @@ from readthedocs.builds.constants import (
     ALL_VERSIONS,
     BRANCH,
     BRANCH_TEXT,
+    EXTERNAL,
+    EXTERNAL_TEXT,
     TAG,
     TAG_TEXT,
 )
@@ -113,6 +115,7 @@ class RegexAutomationRuleForm(forms.ModelForm):
             'predefined_match_arg',
             'match_arg',
             'version_type',
+            'action_arg',
             'action',
         ]
         # Don't pollute the UI with help texts
@@ -133,6 +136,7 @@ class RegexAutomationRuleForm(forms.ModelForm):
             (None, '-' * 9),
             (BRANCH, BRANCH_TEXT),
             (TAG, TAG_TEXT),
+            (EXTERNAL, EXTERNAL_TEXT),
         ]
 
         # Remove privacy actions not available in community
@@ -154,6 +158,38 @@ class RegexAutomationRuleForm(forms.ModelForm):
         # if they want to use a custom one.
         if self.instance.pk and self.instance.predefined_match_arg:
             self.initial['match_arg'] = self.instance.get_match_arg()
+
+    def clean_action(self):
+        """Check the action is allowed for this type of rule."""
+        action = self.cleaned_data['action']
+        version_type = self.cleaned_data['version_type']
+        allowed_actions = VersionAutomationRule.allowed_actions_on_external_versions.keys()
+        if version_type == EXTERNAL and action not in allowed_actions:
+            raise forms.ValidationError(
+                _('Invalid action for this version type.'),
+            )
+        return action
+    
+    def clean_action_arg(self):
+        """
+        Validate the action argument.
+
+        Currently only external versions accept this argument.
+        Indicates the pattern of the base_branch.
+        """
+        action_arg = self.cleaned_data['action_arg']
+        version_type = self.cleaned_data['version_type']
+        if version_type == EXTERNAL:
+            if not action_arg:
+                action_arg = '.*'
+            try:
+                re.compile(action_arg)
+                return action_arg
+            except Exception:
+                raise forms.ValidationError(
+                    _('Invalid Python regular expression.'),
+                )
+        return ''
 
     def clean_match_arg(self):
         """Check that a custom match was given if a predefined match wasn't used."""
@@ -185,6 +221,7 @@ class RegexAutomationRuleForm(forms.ModelForm):
                 predefined_match_arg=self.cleaned_data['predefined_match_arg'],
                 version_type=self.cleaned_data['version_type'],
                 action=self.cleaned_data['action'],
+                action_arg=self.cleaned_data['action_arg'],
             )
         if not rule.description:
             rule.description = rule.get_description()
